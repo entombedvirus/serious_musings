@@ -1,4 +1,4 @@
-# This is the test article two
+# Intro Post
 
 This is the perex of the test article with implicit date (based on `File.mktime`)
 
