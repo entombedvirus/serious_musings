@@ -2,4 +2,5 @@
 
 This is the perex of the test article with implicit date (based on `File.mktime`)
 
-This should show up as the body. This too. Third time is the charm. *sigh*
+
+Welcome to Serious Musings.
