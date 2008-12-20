@@ -1,6 +1,5 @@
 # Intro Post
 
-This is the perex of the test article with implicit date (based on `File.mktime`)
+Brief Introduction of myself and this blog.
 
-
-Welcome to Serious Musings.
+Welcome to Serious Musings. Here you'll find some of my rants and discoveries related to ruby, rails and web development in general. I hope that this blog will turn out to be a place to organize my thoughts; at least some of which might turn out to be useful to the community.
