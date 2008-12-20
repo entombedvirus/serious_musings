@@ -1,0 +1,74 @@
+# Leaky Sockets and mongrel_rails
+
+On how mongrel_rails restart leaks active sockets and how to fix the problem.
+
+### The Symptoms
+
+At [Serious Business](http://seriousbusiness.com), we run somewhere north of 350 mongrels to handle around 10 million page views per day for our game [Friends For Sale](http://apps.facebook.com/friendsforsale/?s=ext-rr). Like many other high performance Web applications, we make extensive use of [memcached][1] (90 gigs across 5 machines, to be exact) to cache content so that our databases won't crumble under heavy load. All was well until we noticed the load graph on our app servers started to resemble a hockey stick during preak hours. 
+
+![Leaky Faucet, by
+http://www.flickr.com/photos/jennyromney/1174415892/](images/leaky.jpg "Leaky
+Faucet by http://www.flickr.com/photos/jennyromney/1174415892/")
+### The Diagnosis
+
+When several hours of profiling our application code yielded next to nothing concrete as to the cause of the high machine load, we started to notice another graph on our [munin][2] dashboard: the memcached connections graph. Soon after a deploy of the production code, the number of current connections to memecached started to climb until it hit the 2000 connections limit and flat-lined. Since we start each of our memcached daemons with an explicit limit of 2000 simulatneous connections (with the -c switch) and since we should not even approach that limit as we are only running ~350 mongrels, this was cause for concern. A quick google search to dust off the cobbwebs around awk syntax, I ended up with this:
+
+    netstat -n | awk '$4 ~ /:11211/ {split($5, key, /:/); data[key[1]] = data[key[1]] + 1} END {for (i in data) print i, data[i] }'
+
+When that magic incantation is run on any machine running memcache on port 11211, it prints out a breakdown of how many connections have been established to memecached grouped by external IP. It turned out that each deploy caused the number of active connection to double. Since the number of connections dropped down to zero when we killed all the mongrels, it was clear that mongrels were leaking connections to memecached. After making sure that it was not anything in the way [memcache-client][3] handles sockets, we concluded that the leaking of sockets was happening at a lower level than ruby code that we wrote. Since the doubling of established connections seemed to be triggered by deploys, we began looking in to how mongrels were restarted when we deployed code to production. This is the relevant part from our god config that restarts our mongrels:
+
+	God.watch do |w|
+		w.name = "ffs-mongrel-#{port}"
+		w.group = 'ffs'
+		w.interval = 10.seconds # default
+		w.start = "mongrel_rails start -c #{RAILS_ROOT} -p #{port} -P #{RAILS_ROOT}/tmp/pids/mongrel.#{port}.pid  -d -e staging -a #{interface}"
+		w.restart = "mongrel_rails restart -P #{RAILS_ROOT}/tmp/pids/mongrel.#{port}.pid"
+		w.stop = "mongrel_rails stop -P #{RAILS_ROOT}/tmp/pids/mongrel.#{port}.pid"
+		w.start_grace = 10.seconds
+		w.restart_grace = (10).seconds
+		w.pid_file = File.join(RAILS_ROOT, "tmp/pids/mongrel.#{port}.pid")
+	end
+
+Nothing out of the ordinary. Since it was the restart command that ran every time we deployed, we opened up the `mongrel_rails` script that comes with the mongrel gem<link> to eventually stumble upon this little gem:
+
+	if config.needs_restart
+		if RUBY_PLATFORM !~ /mswin/
+			cmd = "ruby #{__FILE__} start #{original_args.join(' ')}"
+			config.log "Restarting with arguments:  #{cmd}"
+			config.stop(false, true)
+			config.remove_pid_file
+
+			if config.defaults[:daemon]
+				system cmd
+			else
+				STDERR.puts "Can't restart unless in daemon mode."
+				exit 1
+			end
+		else
+			config.log "Win32 does not support restarts. Exiting."
+		end
+	end
+
+So `mongrel_rails` simply issues a `Kernel::system()` call with the same arguments it was passed in order to restart a mongrel and exits. Nothing wrong with that. The devil, as to be expected of him, seems to be aware of the details of the things god does. In this particular case, that particular detail turns out to be how Ruby executes a `system()` call. Inside the Ruby interpreter, the [`fork()`][4] call is issued to create a child process in order to execute whatever string was passed to `Kernel::system()`. It is, however, the parent process' responsibility to release any resources that it had access to before exiting when it forks. Since the parent process exited without closing the open sockets to memcached, those sockets were leaked and the child process established brand new connections to memecached as it gets spun up, effectively increasing the number of active connections to memcached by the number of mongrels.
+
+### The Cure
+
+If it is the `fork()` call that causes mongrel_rails to leak active sockets, then it follows that the easiest solution would be  avoiding the call to `fork()` altogether. And the best way to do that seems to be __completely avoiding using mongrel_rails restart__. And do a __mongrel_rails stop followed by a mongrel_rails start__ instead. Turns out that god is smart enough to do this if you don't explicitly provide a restart command. So our new god watch looks like this:
+
+	God.watch do |w|
+		w.name = "ffs-mongrel-#{port}"
+		w.group = 'ffs'
+		w.interval = 10.seconds # default
+		w.start = "mongrel_rails start -c #{RAILS_ROOT} -p #{port} -P #{RAILS_ROOT}/tmp/pids/mongrel.#{port}.pid  -d -e staging -a #{interface}"
+		w.stop = "mongrel_rails stop -P #{RAILS_ROOT}/tmp/pids/mongrel.#{port}.pid"
+		w.start_grace = 10.seconds
+		w.restart_grace = (10).seconds
+		w.pid_file = File.join(RAILS_ROOT, "tmp/pids/mongrel.#{port}.pid")
+	end
+
+A one-line-deletion-fix to a problem that took a better part of a day to diagnose. Small victories; I must remember to cherish these.
+
+[1]: http://www.danga.com/memcached/ "memcached"
+[2]: http://munin.projects.linpro.no/ "Munin"
+[3]: http://seattlerb.rubyforge.org/memcache-client/ "memcache-client"
+[4]: http://en.wikipedia.org/wiki/Fork_(operating_system) "Fork (operating system)"
