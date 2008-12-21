@@ -7,7 +7,7 @@ http://www.flickr.com/photos/jennyromney/1174415892/](images/leaky.jpg "Leaky
 Faucet by http://www.flickr.com/photos/jennyromney/1174415892/")
 ### The Symptoms
 
-At [Serious Business](http://seriousbusiness.com), we run somewhere north of 350 mongrels to handle around 10 million page views per day for our game [Friends For Sale](http://apps.facebook.com/friendsforsale/?s=ext-rr). Like many other high performance Web applications, we make extensive use of [memcached][1] (90 gigs across 5 machines, to be exact) to cache content so that our databases won't crumble under heavy load. All was well until we noticed the load graph on our app servers started to resemble a hockey stick during preak hours. 
+At [Serious Business](http://seriousbusiness.com), we run somewhere north of 350 mongrels to handle around 10 million page views per day for our game [Friends For Sale](http://apps.facebook.com/friendsforsale/?s=ext-rr). Like many other high performance Web applications, we make extensive use of [memcached][1] (90 gigs across 5 machines, to be exact) to cache content so that our databases won't crumble under heavy load. All was well until we noticed the load graph on our app servers started to resemble a hockey stick during peak hours. 
 
 ### The Diagnosis
 
